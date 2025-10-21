@@ -12,6 +12,8 @@ use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Mail;
+
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 
@@ -74,23 +76,45 @@ class OfferResource extends Resource
                     ->icon('heroicon-o-paper-airplane')
                     ->requiresConfirmation()
                     ->action(function ($record) {
-                        $template = \App\Models\EmailTemplate::first();
-                        if (!$template) {
-                            throw new \Exception('No email template found.');
+                        try {
+                            $template = \App\Models\EmailTemplate::first();
+                            if (!$template) {
+                                throw new \Exception('No email template found!');
+                            }
+
+                            \Mail::to($record->client->email)->send(
+                                new \App\Mail\OfferEmail(
+                                    $record->client,
+                                    $record->property,
+                                    $template,
+                                )
+                            );
+
+                            \App\Models\EmailLog::create([
+                                'client_id' => $record->client_id,
+                                'offer_id' => $record->id,
+                                'status' => 'sent',
+                                'sent_at' => now(),
+                            ]);
+
+                            // Offer status update
+                            $record->update([
+                                'status' => 'sent',
+                            ]);
+
+                            \Filament\Notifications\Notification::make()
+                                ->title('Email sent successfully!')
+                                ->success()
+                                ->send();
+
+                        } catch (\Exception $e) {
+                            \Filament\Notifications\Notification::make()
+                                ->title('Email failed: '.$e->getMessage())
+                                ->danger()
+                                ->send();
                         }
-
-                        \Mail::to($record->client->email)->send(
-                            new \App\Mail\OfferEmail($record->client, $record->property, $template)
-                        );
-
-                        // Save email log
-                        \App\Models\EmailLog::create([
-                            'client_id' => $record->client_id,
-                            'offer_id' => $record->id,
-                            'status' => 'sent',
-                            'sent_at' => now(),
-                        ]);
                     }),
+
 
             ])
             ->bulkActions([
